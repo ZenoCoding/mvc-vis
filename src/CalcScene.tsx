@@ -7,6 +7,7 @@ import {
   computeProbe,
   length,
   mathToThree,
+  sampleImplicitSurface,
   sampleCurve,
   sampleCurlField,
   sampleDivergenceField,
@@ -14,10 +15,12 @@ import {
   sampleSurface,
   sampleTraceCurves,
   sampleVectorField,
+  sampleVectorFieldLines,
   vectorToThree,
   type CompiledGraph,
   type CompiledCalculusOverlay,
   type CompiledCurve,
+  type CompiledImplicitSurface,
   type CompiledPlane,
   type CompiledSurface,
   type CompiledVectorField,
@@ -96,6 +99,13 @@ function SceneContents({
           surface={surface}
           settings={settings}
           onProbeChange={onProbeChange}
+        />
+      ))}
+      {graph.implicitSurfaces.map((surface) => (
+        <ImplicitSurfaceMesh
+          key={surface.row.id}
+          surface={surface}
+          settings={settings}
         />
       ))}
       {graph.curves.map((curve) => (
@@ -204,6 +214,40 @@ function SurfaceMesh({
   )
 }
 
+function ImplicitSurfaceMesh({
+  surface,
+  settings,
+}: {
+  surface: CompiledImplicitSurface
+  settings: GraphSettings
+}) {
+  const geometry = useMemo(() => {
+    const sampled = sampleImplicitSurface(surface, settings.bounds, 34)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(sampled.positions, 3))
+    if (sampled.normals) {
+      geo.setAttribute('normal', new THREE.BufferAttribute(sampled.normals, 3))
+    }
+    geo.setIndex(new THREE.BufferAttribute(sampled.indices, 1))
+    if (!sampled.normals) geo.computeVertexNormals()
+    return geo
+  }, [surface, settings.bounds])
+
+  return (
+    <mesh geometry={geometry}>
+      <meshStandardMaterial
+        color={surface.row.color}
+        roughness={0.58}
+        metalness={0.02}
+        transparent={settings.translucentSurfaces}
+        opacity={settings.translucentSurfaces ? 0.34 : 0.82}
+        depthWrite={!settings.translucentSurfaces}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  )
+}
+
 function CurveObject({
   curve,
   color,
@@ -217,6 +261,20 @@ function CurveObject({
 }
 
 function VectorFieldObject({
+  field,
+  settings,
+}: {
+  field: CompiledVectorField
+  settings: GraphSettings
+}) {
+  return settings.vectorStyle === 'lines' ? (
+    <VectorFieldLinesObject field={field} settings={settings} />
+  ) : (
+    <VectorFieldArrowsObject field={field} settings={settings} />
+  )
+}
+
+function VectorFieldArrowsObject({
   field,
   settings,
 }: {
@@ -244,6 +302,38 @@ function VectorFieldObject({
             scale={scale}
             headLength={0.13}
             headWidth={0.075}
+          />
+        )
+      })}
+    </group>
+  )
+}
+
+function VectorFieldLinesObject({
+  field,
+  settings,
+}: {
+  field: CompiledVectorField
+  settings: GraphSettings
+}) {
+  const lines = useMemo(
+    () => sampleVectorFieldLines(field, settings.bounds, settings),
+    [field, settings],
+  )
+  const maxMagnitude = Math.max(1, ...lines.map((line) => line.magnitude))
+
+  return (
+    <group>
+      {lines.map((line, index) => {
+        const ratio = line.magnitude / maxMagnitude
+        return (
+          <Line
+            key={`${line.points[0]?.x}-${line.points[0]?.y}-${line.points[0]?.z}-${index}`}
+            points={line.points.map(mathToThree)}
+            color={magnitudeColor(ratio)}
+            lineWidth={1.35 + ratio * 2.15}
+            transparent
+            opacity={0.42 + ratio * 0.5}
           />
         )
       })}

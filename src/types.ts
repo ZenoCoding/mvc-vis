@@ -38,6 +38,7 @@ export interface GraphSettings {
   translucentSurfaces: boolean
   vectorDensity: number
   vectorScale: number
+  vectorStyle: 'arrows' | 'lines'
   vectorMode: 'volume' | 'slice'
   gradient: boolean
   divergence: boolean

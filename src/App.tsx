@@ -739,6 +739,22 @@ function SettingsPanel({
         <div className="segmented">
           <button
             type="button"
+            className={settings.vectorStyle === 'arrows' ? 'selected' : ''}
+            onClick={() => onSettingsChange((current) => ({ ...current, vectorStyle: 'arrows' }))}
+          >
+            Arrows
+          </button>
+          <button
+            type="button"
+            className={settings.vectorStyle === 'lines' ? 'selected' : ''}
+            onClick={() => onSettingsChange((current) => ({ ...current, vectorStyle: 'lines' }))}
+          >
+            Lines
+          </button>
+        </div>
+        <div className="segmented">
+          <button
+            type="button"
             className={settings.vectorMode === 'volume' ? 'selected' : ''}
             onClick={() => onSettingsChange((current) => ({ ...current, vectorMode: 'volume' }))}
           >

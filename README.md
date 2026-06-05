@@ -1,73 +1,51 @@
-# React + TypeScript + Vite
+# Calc3D (mvc-vis)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+**Calc3D** is a beautiful, interactive 3D graphing calculator and visualization sandbox designed for multivariable calculus. It allows students and educators to plot complex mathematical objects and develop deep geometric intuition for vector fields, derivatives, and surfaces.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Key Features
 
-## React Compiler
+* **3D Surface Plotting:** Graph explicit surfaces of the form $z = f(x, y)$ with support for customized domain bounds and transparency.
+* **Implicit Surface Graphing:** Plot implicit equations (e.g., $x^2 + y^2 + z^2 = 9$ or $z^2 - x^2 - y^2 = 1$) rendered in real-time using a fast **Marching Tetrahedra** polygonization algorithm.
+* **Parametric Curves:** Visualize 3D curves defined by vector-valued functions $\mathbf{r}(t) = \langle x(t), y(t), z(t) \rangle$ with dynamic tangent vectors.
+* **Vector Fields & Streamlines:** Graph 3D vector fields $\mathbf{F}(x, y, z)$ in two modes:
+  * **Volume / Slice:** View vectors in a 3D grid volume or projected onto a 2D slice plane.
+  * **Arrows / Streamline Lines:** Choose between traditional arrow grids or trace continuous streamline flow lines.
+* **Interactive Mathematical Probe:** Click and drag a 3D probe through the graph to calculate and display real-time readouts of:
+  * Local vector field evaluation
+  * Gradient vectors
+  * Tangent planes
+  * Divergence and Curl values
+* **Aesthetics:** A premium dark mode UI, smooth camera controls, and customizable grids/axes.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Tech Stack
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+* **Framework:** React 19 + TypeScript + Vite
+* **Rendering:** High-performance custom 3D math projection engine rendering to HTML5 Canvas
+* **Styling:** Vanilla CSS glassmorphic user interface
+* **Icons:** Lucide React
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+---
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Getting Started
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Installation
+Clone the repository and install dependencies:
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Running Locally
+Start the Vite development server:
+```bash
+npm run dev
+```
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Production Build
+Build the optimized bundle:
+```bash
+npm run build
 ```

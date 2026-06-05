@@ -20,6 +20,15 @@ export interface CompiledSurface {
   dy: ScalarFn
 }
 
+export interface CompiledImplicitSurface {
+  row: ExpressionRow
+  source: string
+  value: ScalarFn
+  dx: ScalarFn
+  dy: ScalarFn
+  dz: ScalarFn
+}
+
 export interface CompiledCurve {
   row: ExpressionRow
   components: [ScalarFn, ScalarFn, ScalarFn]
@@ -59,6 +68,7 @@ export interface RowCompileError {
 
 export interface CompiledGraph {
   surfaces: CompiledSurface[]
+  implicitSurfaces: CompiledImplicitSurface[]
   curves: CompiledCurve[]
   vectors: CompiledVectorField[]
   planes: CompiledPlane[]
@@ -69,6 +79,7 @@ export interface CompiledGraph {
 export interface SurfaceSample {
   positions: Float32Array
   indices: Uint32Array
+  normals?: Float32Array
 }
 
 export interface CurveSample {
@@ -78,6 +89,11 @@ export interface CurveSample {
 export interface VectorSample {
   origin: Vec3
   vector: Vec3
+  magnitude: number
+}
+
+export interface VectorLineSample {
+  points: Vec3[]
   magnitude: number
 }
 
@@ -180,6 +196,7 @@ export const defaultSettings: GraphSettings = {
   translucentSurfaces: true,
   vectorDensity: 4,
   vectorScale: 0.46,
+  vectorStyle: 'arrows',
   vectorMode: 'volume',
   gradient: true,
   divergence: true,
@@ -212,13 +229,14 @@ export function detectExpressionType(expression: string): ExpressionType {
   if ('divergence'.startsWith(value) || 'div'.startsWith(value)) return 'unresolved'
   if ('curl'.startsWith(value)) return 'unresolved'
   if (/^[xyz]\s*=/.test(value)) return 'plane'
-  if (value.includes('=') && value.includes('^')) return 'implicit'
+  if (value.includes('=') && /[xyz]/.test(value)) return 'implicit'
   return 'unresolved'
 }
 
 export function compileRows(rows: ExpressionRow[]): CompiledGraph {
   const errors: RowCompileError[] = []
   const surfaces: CompiledSurface[] = []
+  const implicitSurfaces: CompiledImplicitSurface[] = []
   const curves: CompiledCurve[] = []
   const vectors: CompiledVectorField[] = []
   const planes: CompiledPlane[] = []
@@ -230,13 +248,15 @@ export function compileRows(rows: ExpressionRow[]): CompiledGraph {
     const inferredType = detectExpressionType(row.expression)
     try {
       if (inferredType === 'surface') surfaces.push(compileSurface({ ...row, type: inferredType }))
+      if (inferredType === 'implicit') {
+        implicitSurfaces.push(compileImplicitSurface({ ...row, type: inferredType }))
+      }
       if (inferredType === 'curve') curves.push(compileCurve({ ...row, type: inferredType }))
       if (inferredType === 'vector') vectors.push(compileVectorField({ ...row, type: inferredType }))
       if (inferredType === 'plane') planes.push(compilePlane({ ...row, type: inferredType }))
       if (isCalculusOverlay(inferredType)) {
         overlays.push({ row: { ...row, type: inferredType }, type: inferredType })
       }
-      if (inferredType === 'implicit') throw new Error('Implicit surfaces are not implemented yet')
       if (inferredType === 'unresolved') throw new Error('Expression is incomplete or not supported yet')
     } catch (error) {
       errors.push({
@@ -255,7 +275,7 @@ export function compileRows(rows: ExpressionRow[]): CompiledGraph {
     }
   }
 
-  return { surfaces, curves, vectors, planes, overlays, errors }
+  return { surfaces, implicitSurfaces, curves, vectors, planes, overlays, errors }
 }
 
 function isCalculusOverlay(type: ExpressionType): type is CompiledCalculusOverlay['type'] {
@@ -303,6 +323,82 @@ export function sampleSurface(
   }
 }
 
+export function sampleImplicitSurface(
+  surface: CompiledImplicitSurface,
+  bounds: Bounds3,
+  resolution = 34,
+): SurfaceSample {
+  const positions: number[] = []
+  const normals: number[] = []
+  const indices: number[] = []
+  const nx = resolution
+  const ny = resolution
+  const nz = resolution
+  const strideY = nz + 1
+  const strideX = (ny + 1) * strideY
+  const values = new Float32Array((nx + 1) * (ny + 1) * (nz + 1))
+
+  for (let ix = 0; ix <= nx; ix += 1) {
+    const x = lerp(bounds.xMin, bounds.xMax, ix / nx)
+    for (let iy = 0; iy <= ny; iy += 1) {
+      const y = lerp(bounds.yMin, bounds.yMax, iy / ny)
+      for (let iz = 0; iz <= nz; iz += 1) {
+        const z = lerp(bounds.zMin, bounds.zMax, iz / nz)
+        values[gridIndex(ix, iy, iz, strideX, strideY)] = surface.value(scope({ x, y, z, t: 0 }))
+      }
+    }
+  }
+
+  const cubeOffsets: Vec3[] = [
+    { x: 0, y: 0, z: 0 },
+    { x: 1, y: 0, z: 0 },
+    { x: 1, y: 1, z: 0 },
+    { x: 0, y: 1, z: 0 },
+    { x: 0, y: 0, z: 1 },
+    { x: 1, y: 0, z: 1 },
+    { x: 1, y: 1, z: 1 },
+    { x: 0, y: 1, z: 1 },
+  ]
+  const tetrahedra = [
+    [0, 5, 1, 6],
+    [0, 1, 2, 6],
+    [0, 2, 3, 6],
+    [0, 3, 7, 6],
+    [0, 7, 4, 6],
+    [0, 4, 5, 6],
+  ] as const
+
+  for (let ix = 0; ix < nx; ix += 1) {
+    for (let iy = 0; iy < ny; iy += 1) {
+      for (let iz = 0; iz < nz; iz += 1) {
+        const cubePoints = cubeOffsets.map((offset) => {
+          const gx = ix + offset.x
+          const gy = iy + offset.y
+          const gz = iz + offset.z
+          return {
+            x: lerp(bounds.xMin, bounds.xMax, gx / nx),
+            y: lerp(bounds.yMin, bounds.yMax, gy / ny),
+            z: lerp(bounds.zMin, bounds.zMax, gz / nz),
+          }
+        })
+        const cubeValues = cubeOffsets.map((offset) =>
+          values[gridIndex(ix + offset.x, iy + offset.y, iz + offset.z, strideX, strideY)],
+        )
+
+        for (const tetrahedron of tetrahedra) {
+          polygonizeTetrahedron(surface, tetrahedron, cubePoints, cubeValues, positions, normals, indices)
+        }
+      }
+    }
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    indices: new Uint32Array(indices),
+    normals: new Float32Array(normals),
+  }
+}
+
 export function sampleCurve(curve: CompiledCurve, samples = 320): CurveSample {
   const points: Vec3[] = []
   const tMin = -4 * Math.PI
@@ -344,6 +440,48 @@ export function sampleVectorField(
         const magnitude = length(vector)
         if (Number.isFinite(magnitude) && magnitude > 0.00001) {
           samples.push({ origin: { x, y, z }, vector, magnitude })
+        }
+      }
+    }
+  }
+
+  return samples
+}
+
+export function sampleVectorFieldLines(
+  field: CompiledVectorField,
+  bounds: Bounds3,
+  settings: GraphSettings,
+): VectorLineSample[] {
+  const samples: VectorLineSample[] = []
+  const density = clamp(Math.round(settings.vectorDensity), 2, 7)
+  const seedSteps = density + 1
+  const zIterations = settings.vectorMode === 'slice' ? 1 : seedSteps
+  const minSpan = Math.min(
+    bounds.xMax - bounds.xMin,
+    bounds.yMax - bounds.yMin,
+    bounds.zMax - bounds.zMin,
+  )
+  const stepSize = minSpan / (density + 9)
+  const maxSteps = settings.vectorMode === 'slice' ? 18 : 12
+
+  for (let ix = 0; ix < seedSteps; ix += 1) {
+    const x = lerp(bounds.xMin, bounds.xMax, (ix + 0.5) / seedSteps)
+    for (let iy = 0; iy < seedSteps; iy += 1) {
+      const y = lerp(bounds.yMin, bounds.yMax, (iy + 0.5) / seedSteps)
+      for (let iz = 0; iz < zIterations; iz += 1) {
+        const z =
+          settings.vectorMode === 'slice'
+            ? 0
+            : lerp(bounds.zMin, bounds.zMax, (iz + 0.5) / zIterations)
+        const seed = { x, y, z }
+        const backward = traceVectorLine(field, seed, bounds, settings.vectorMode, -1, stepSize, maxSteps)
+        const forward = traceVectorLine(field, seed, bounds, settings.vectorMode, 1, stepSize, maxSteps)
+        const points = [...backward.points.reverse(), seed, ...forward.points]
+        const magnitude = Math.max(backward.magnitude, forward.magnitude)
+
+        if (points.length > 2 && magnitude > 0.00001) {
+          samples.push({ points, magnitude })
         }
       }
     }
@@ -564,6 +702,21 @@ function compileSurface(row: ExpressionRow): CompiledSurface {
   }
 }
 
+function compileImplicitSurface(row: ExpressionRow): CompiledImplicitSurface {
+  const source = implicitEquationSource(row.expression)
+  const compiled = compile(source) as Compiled
+  const value = scalarFromCompiled(compiled)
+
+  return {
+    row,
+    source,
+    value,
+    dx: derivativeFn(source, 'x', value),
+    dy: derivativeFn(source, 'y', value),
+    dz: derivativeFn(source, 'z', value),
+  }
+}
+
 function compileCurve(row: ExpressionRow): CompiledCurve {
   const parts = vectorParts(rightHandSide(row.expression))
   if (parts.length !== 3) throw new Error('Curve needs three components')
@@ -642,6 +795,52 @@ function evaluateVector(field: CompiledVectorField, values: Pick<Vec3, 'x' | 'y'
   }
 }
 
+function traceVectorLine(
+  field: CompiledVectorField,
+  seed: Vec3,
+  bounds: Bounds3,
+  mode: GraphSettings['vectorMode'],
+  direction: 1 | -1,
+  stepSize: number,
+  maxSteps: number,
+) {
+  const points: Vec3[] = []
+  let current = seed
+  let maxMagnitude = 0
+
+  for (let step = 0; step < maxSteps; step += 1) {
+    const rawVector = evaluateVector(field, current)
+    const vector = mode === 'slice' ? { ...rawVector, z: 0 } : rawVector
+    const magnitude = length(vector)
+    if (!Number.isFinite(magnitude) || magnitude < 0.00001) break
+
+    maxMagnitude = Math.max(maxMagnitude, magnitude)
+    const unit = normalize(vector)
+    const next = {
+      x: current.x + unit.x * stepSize * direction,
+      y: current.y + unit.y * stepSize * direction,
+      z: mode === 'slice' ? 0 : current.z + unit.z * stepSize * direction,
+    }
+    if (!insideBounds(next, bounds)) break
+
+    points.push(next)
+    current = next
+  }
+
+  return { points, magnitude: maxMagnitude }
+}
+
+function insideBounds(point: Vec3, bounds: Bounds3) {
+  return (
+    point.x >= bounds.xMin &&
+    point.x <= bounds.xMax &&
+    point.y >= bounds.yMin &&
+    point.y <= bounds.yMax &&
+    point.z >= bounds.zMin &&
+    point.z <= bounds.zMax
+  )
+}
+
 function tangentPoint(
   x0: number,
   y0: number,
@@ -656,6 +855,87 @@ function tangentPoint(
     y: y0 + dy,
     z: z0 + fx * dx + fy * dy,
   }
+}
+
+function polygonizeTetrahedron(
+  surface: CompiledImplicitSurface,
+  tetrahedron: readonly [number, number, number, number],
+  cubePoints: Vec3[],
+  cubeValues: number[],
+  positions: number[],
+  normals: number[],
+  indices: number[],
+) {
+  const edgePairs = [
+    [0, 1],
+    [0, 2],
+    [0, 3],
+    [1, 2],
+    [1, 3],
+    [2, 3],
+  ] as const
+  const intersections: Vec3[] = []
+
+  for (const [aLocal, bLocal] of edgePairs) {
+    const a = tetrahedron[aLocal]
+    const b = tetrahedron[bLocal]
+    const va = cubeValues[a]
+    const vb = cubeValues[b]
+    if (!Number.isFinite(va) || !Number.isFinite(vb)) continue
+    if (!edgeCrossesZero(va, vb)) continue
+    const t = clamp(va / (va - vb), 0, 1)
+    intersections.push(lerpPoint(cubePoints[a], cubePoints[b], t))
+  }
+
+  if (intersections.length === 3) {
+    pushImplicitTriangle(surface, intersections[0], intersections[1], intersections[2], positions, normals, indices)
+  }
+  if (intersections.length === 4) {
+    pushImplicitTriangle(surface, intersections[0], intersections[1], intersections[2], positions, normals, indices)
+    pushImplicitTriangle(surface, intersections[0], intersections[2], intersections[3], positions, normals, indices)
+  }
+}
+
+function pushImplicitTriangle(
+  surface: CompiledImplicitSurface,
+  a: Vec3,
+  b: Vec3,
+  c: Vec3,
+  positions: number[],
+  normals: number[],
+  indices: number[],
+) {
+  const index = positions.length / 3
+  positions.push(...mathToThree(a), ...mathToThree(b), ...mathToThree(c))
+  normals.push(...implicitNormal(surface, a), ...implicitNormal(surface, b), ...implicitNormal(surface, c))
+  indices.push(index, index + 1, index + 2)
+}
+
+function implicitNormal(surface: CompiledImplicitSurface, point: Vec3): [number, number, number] {
+  const s = scope({ ...point, t: 0 })
+  const normal = normalize({
+    x: surface.dx(s),
+    y: surface.dy(s),
+    z: surface.dz(s),
+  })
+  if (length(normal) < 0.00001) return [0, 1, 0]
+  return [normal.x, normal.z, normal.y]
+}
+
+function edgeCrossesZero(a: number, b: number) {
+  return (a < 0 && b > 0) || (a > 0 && b < 0)
+}
+
+function lerpPoint(a: Vec3, b: Vec3, t: number): Vec3 {
+  return {
+    x: lerp(a.x, b.x, t),
+    y: lerp(a.y, b.y, t),
+    z: lerp(a.z, b.z, t),
+  }
+}
+
+function gridIndex(ix: number, iy: number, iz: number, strideX: number, strideY: number) {
+  return ix * strideX + iy * strideY + iz
 }
 
 function scope(values: Scope): Scope {
@@ -684,6 +964,15 @@ function normalizeMathInput(input: string) {
 function rightHandSide(expression: string) {
   const index = expression.indexOf('=')
   return index >= 0 ? expression.slice(index + 1).trim() : expression.trim()
+}
+
+function implicitEquationSource(expression: string) {
+  const index = expression.indexOf('=')
+  if (index < 0) throw new Error('Implicit surface must be an equation')
+  const left = normalizeMathInput(expression.slice(0, index))
+  const right = normalizeMathInput(expression.slice(index + 1))
+  if (!left || !right) throw new Error('Implicit surface needs both sides of the equation')
+  return `(${left}) - (${right})`
 }
 
 function vectorParts(value: string) {
